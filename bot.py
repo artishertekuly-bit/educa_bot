@@ -26,20 +26,26 @@ client = genai.Client(
     http_options=types.HttpOptions(
         timeout=180000,
         retry_options=types.HttpRetryOptions(
-            attempts=3,
-            initial_delay=1.0,
-            max_delay=8.0,
+            attempts=5,
+            initial_delay=2.0,
+            max_delay=30.0,
             exp_base=2.0,
             jitter=1.0,
-            http_status_codes=[408, 429, 500, 502, 503, 504]
+            http_status_codes=[
+                408, 429, 500, 502, 503, 504
+            ]
         )
     )
 )
 
+
 GEMINI_MODELS = [
     "gemini-3.8-flash",
-    "gemini-3.7-flash"
+    "gemini-3.7-flash",
+    "gemini-3.6-flash",
+    "gemini-3.5-flash-lite"
 ]
+
 
 
 KZ_NEWS_FEEDS = [
@@ -113,9 +119,31 @@ def fetch_new_rss_item(feeds, published_ids):
             for entry in feed.entries:
                 link = entry.get("link", "").strip()
                 if link and link not in published_ids:
-                    raw_summary = entry.get(
-                        "summary", entry.get("description", "")
-                    )
+                    # RSS ішіндегі қолжетімді мәтіндерді жинау
+candidates = [
+    entry.get("summary", ""),
+    entry.get("description", "")
+]
+
+# Толық мәтін content ішінде болуы мүмкін
+for block in entry.get("content", []):
+    candidates.append(block.get("value", ""))
+
+# Ең толық мәтінді таңдау
+clean_candidates = []
+
+for candidate in candidates:
+    if candidate:
+        clean = re.sub(r"<[^>]+>", " ", candidate)
+        clean = re.sub(r"\s+", " ", clean).strip()
+
+        if clean:
+            clean_candidates.append(clean)
+
+clean_summary = (
+    max(clean_candidates, key=len)[:1000]
+    if clean_candidates else ""
+)
                     clean_summary = re.sub(r"<[^>]+>", " ", raw_summary)
                     clean_summary = re.sub(r"\s+", " ", clean_summary).strip()
                     return {
