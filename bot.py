@@ -112,12 +112,12 @@ def fetch_new_rss_item(feeds, published_ids):
 
 
 def generate_text_with_gemini(prompt):
-    """Тұрақты gemini-2.5-flash моделін қолдану және қате болса 4 рет қайталау."""
+    """Google талап еткен gemini-3.8-flash моделін қолдану."""
     for attempt in range(1, 5):
         try:
-            log(f"Gemini сұранысы (Талпыныс {attempt})...")
+            log(f"Gemini сұранысы (Талпыныс {attempt}, модель: gemini-3.8-flash)...")
             response = client.models.generate_content(
-                model="gemini-2.5-flash",
+                model="gemini-3.8-flash",
                 contents=prompt,
             )
             if response and response.text:
@@ -125,7 +125,7 @@ def generate_text_with_gemini(prompt):
         except Exception as e:
             log(f"Ескерту (Талпыныс {attempt}): {e}")
             time.sleep(6)
-    raise RuntimeError("Gemini сервері қазір жүктелген. Сәлден соң қайта көріңіз.")
+    raise RuntimeError("Gemini сервері жүктелген. Сәлден соң қайта көріңіз.")
 
 
 def send_to_telegram(text):
