@@ -104,6 +104,7 @@ def save_to_sheet(sheet, category, unique_id, title):
     sheet.append_row([now, category, unique_id, title])
 
 
+
 def fetch_new_rss_item(feeds, published_ids):
     headers = {
         "User-Agent": (
@@ -112,48 +113,69 @@ def fetch_new_rss_item(feeds, published_ids):
             "Chrome/122.0.0.0 Safari/537.36"
         )
     }
+
     for feed_url in feeds:
         try:
-            resp = requests.get(feed_url, headers=headers, timeout=15)
+            resp = requests.get(
+                feed_url,
+                headers=headers,
+                timeout=15
+            )
+            resp.raise_for_status()
+
             feed = feedparser.parse(resp.content)
+
             for entry in feed.entries:
                 link = entry.get("link", "").strip()
+
                 if link and link not in published_ids:
-                    # RSS ішіндегі қолжетімді мәтіндерді жинау
-candidates = [
-    entry.get("summary", ""),
-    entry.get("description", "")
-]
 
-# Толық мәтін content ішінде болуы мүмкін
-for block in entry.get("content", []):
-    candidates.append(block.get("value", ""))
+                    # RSS мәтіндерінің барлық қолжетімді нұсқасын жинау
+                    candidates = [
+                        entry.get("summary", ""),
+                        entry.get("description", "")
+                    ]
 
-# Ең толық мәтінді таңдау
-clean_candidates = []
+                    # Толық мәтін content ішінде болуы мүмкін
+                    for block in entry.get("content", []):
+                        candidates.append(
+                            block.get("value", "")
+                        )
 
-for candidate in candidates:
-    if candidate:
-        clean = re.sub(r"<[^>]+>", " ", candidate)
-        clean = re.sub(r"\s+", " ", clean).strip()
+                    # HTML тегтерін тазалау
+                    clean_candidates = []
 
-        if clean:
-            clean_candidates.append(clean)
+                    for candidate in candidates:
+                        if candidate:
+                            clean = re.sub(
+                                r"<[^>]+>", " ", candidate
+                            )
+                            clean = re.sub(
+                                r"\s+", " ", clean
+                            ).strip()
 
-clean_summary = (
-    max(clean_candidates, key=len)[:1000]
-    if clean_candidates else ""
-)
-                    clean_summary = re.sub(r"<[^>]+>", " ", raw_summary)
-                    clean_summary = re.sub(r"\s+", " ", clean_summary).strip()
+                            if clean:
+                                clean_candidates.append(clean)
+
+                    # Ең толық мәтінді таңдау
+                    clean_summary = (
+                        max(clean_candidates, key=len)[:1000]
+                        if clean_candidates else ""
+                    )
+
                     return {
-                        "title": entry.get("title", "Тақырыпсыз"),
-                        "summary": clean_summary[:1000],
+                        "title": entry.get(
+                            "title", "Тақырыпсыз"
+                        ),
+                        "summary": clean_summary,
                         "link": link
                     }
+
         except Exception as e:
             log(f"RSS қатесі ({feed_url}): {e}")
+
     return None
+
 
 
 
