@@ -1,0 +1,5 @@
+google-genai
+feedparser
+gspread
+google-auth
+requests
