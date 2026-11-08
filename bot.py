@@ -16,9 +16,12 @@ GOOGLE_CREDENTIALS_JSON = os.environ["GOOGLE_CREDENTIALS"]
 
 client = genai.Client(api_key=GEMINI_API_KEY)
 
+# Бұғатталмайтын Google News KZ және қазақстандық RSS-тер
 KZ_NEWS_FEEDS = [
+    "https://news.google.com/rss/search?q=Қазақстан&hl=kk&gl=KZ&ceid=KZ:kk",
     "https://kaz.tengrinews.kz/rss/",
-    "https://informburo.kz/kaz/rss/all.xml"
+    "https://informburo.kz/kaz/rss/all.xml",
+    "https://www.zakon.kz/rss/kaz_all.xml"
 ]
 
 TECH_AI_FEEDS = [
@@ -54,25 +57,37 @@ def save_to_sheet(sheet, category, unique_id, title):
 
 
 def fetch_new_rss_item(feeds, published_ids):
+    headers = {
+        "User-Agent": (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) "
+            "Chrome/122.0.0.0 Safari/537.36"
+        )
+    }
     for feed_url in feeds:
-        feed = feedparser.parse(feed_url)
-        for entry in feed.entries:
-            link = entry.get("link", "").strip()
-            if link and link not in published_ids:
-                summary = entry.get(
-                    "summary", entry.get("description", "")
-                )
-                return {
-                    "title": entry.get("title", "Тақырыпсыз"),
-                    "summary": summary,
-                    "link": link
-                }
+        try:
+            resp = requests.get(feed_url, headers=headers, timeout=15)
+            feed = feedparser.parse(resp.content)
+            print(f"Тексерілді: {feed_url} -> {len(feed.entries)} мақала")
+            for entry in feed.entries:
+                link = entry.get("link", "").strip()
+                if link and link not in published_ids:
+                    summary = entry.get(
+                        "summary", entry.get("description", "")
+                    )
+                    return {
+                        "title": entry.get("title", "Тақырыпсыз"),
+                        "summary": summary,
+                        "link": link
+                    }
+        except Exception as e:
+            print(f"Қате ({feed_url}): {e}")
     return None
 
 
 def generate_text_with_gemini(prompt):
     response = client.models.generate_content(
-        model="gemini-2.5-flash",
+        model="gemini-3.8-flash",
         contents=prompt,
     )
     return response.text.strip()
@@ -91,9 +106,13 @@ def send_to_telegram(text):
     }
     r = requests.post(url, json=payload, timeout=30)
     if not r.ok:
+        print(f"HTML қатесі, қарапайым мәтінмен жіберілуде: {r.text}")
         payload.pop("parse_mode")
         r2 = requests.post(url, json=payload, timeout=30)
+        if not r2.ok:
+            print(f"Telegram қатесі: {r2.text}")
         r2.raise_for_status()
+    print("Telegram-ға сәтті жіберілді!")
 
 
 def run_kz_news(sheet, published_ids):
