@@ -20,10 +20,27 @@ TELEGRAM_CHAT_ID = os.environ["TELEGRAM_CHAT_ID"]
 SPREADSHEET_ID = os.environ["SPREADSHEET_ID"]
 GOOGLE_CREDENTIALS_JSON = os.environ["GOOGLE_CREDENTIALS"]
 
+
 client = genai.Client(
     api_key=GEMINI_API_KEY,
-    http_options=types.HttpOptions(timeout=120000)
+    http_options=types.HttpOptions(
+        timeout=180000,
+        retry_options=types.HttpRetryOptions(
+            attempts=3,
+            initial_delay=1.0,
+            max_delay=8.0,
+            exp_base=2.0,
+            jitter=1.0,
+            http_status_codes=[408, 429, 500, 502, 503, 504]
+        )
+    )
 )
+
+GEMINI_MODELS = [
+    "gemini-3.8-flash",
+    "gemini-3.7-flash"
+]
+
 
 KZ_NEWS_FEEDS = [
     "https://kaz.tengrinews.kz/rss/",
@@ -111,21 +128,62 @@ def fetch_new_rss_item(feeds, published_ids):
     return None
 
 
+
 def generate_text_with_gemini(prompt):
-    """Google талап еткен gemini-3.8-flash моделін қолдану."""
-    for attempt in range(1, 5):
+    """
+    Негізгі модель жауап бермесе, қосалқы модельге ауысады.
+    Әр модель үшін SDK автоматты retry механизмін қолданады.
+    """
+
+    last_error = None
+
+    for model in GEMINI_MODELS:
         try:
-            log(f"Gemini сұранысы (Талпыныс {attempt}, модель: gemini-3.8-flash)...")
+            log(f"Gemini сұранысы басталды: {model}")
+
             response = client.models.generate_content(
-                model="gemini-3.8-flash",
+                model=model,
                 contents=prompt,
+                config=types.GenerateContentConfig(
+                    max_output_tokens=900,
+                    thinking_config=types.ThinkingConfig(
+                        thinking_level="low"
+                    )
+                )
             )
-            if response and response.text:
+
+            if response and response.text and response.text.strip():
+                log(f"Gemini сәтті жауап берді: {model}")
                 return clean_telegram_html(response.text)
+
+            raise RuntimeError(
+                f"{model} бос жауап қайтарды."
+            )
+
         except Exception as e:
-            log(f"Ескерту (Талпыныс {attempt}): {e}")
-            time.sleep(6)
-    raise RuntimeError("Gemini сервері жүктелген. Сәлден соң қайта көріңіз.")
+            last_error = e
+
+            error_code = getattr(e, "code", None)
+            error_status = getattr(e, "status", None)
+
+            log(
+                f"Gemini қатесі ({model}): "
+                f"HTTP={error_code}, "
+                f"Status={error_status}, "
+                f"Message={e}"
+            )
+
+            # API кілті немесе сұраныс конфигурациясы қате болса,
+            # басқа модельге ауысу оны шешпейді.
+            if error_code in (400, 401, 403):
+                break
+
+            log(f"Келесі модельге ауысамыз...")
+
+    raise RuntimeError(
+        "Барлық Gemini модельдері жауап бере алмады."
+    ) from last_error
+
 
 
 def send_to_telegram(text):
@@ -155,6 +213,10 @@ def run_kz_news(sheet, published_ids):
     if not item:
         log("Жаңа жаңалық табылмады.")
         return
+
+    log(f"KZ NEWS тақырыбы: {item['title']}")
+    log(f"KZ NEWS мәтін ұзындығы: {len(item['summary'])} таңба")
+    log(f"KZ NEWS дереккөзі: {item['link']}")
 
     lines = [
         "Сен қазақтілді Telegram-арна редакторысың.",
