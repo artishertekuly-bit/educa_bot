@@ -8,17 +8,14 @@ import gspread
 from google.oauth2.service_account import Credentials
 from google import genai
 
-# 1. Получение секретных ключей из GitHub Secrets
 GEMINI_API_KEY = os.environ["GEMINI_API_KEY"]
 TELEGRAM_BOT_TOKEN = os.environ["TELEGRAM_BOT_TOKEN"]
 TELEGRAM_CHAT_ID = os.environ["TELEGRAM_CHAT_ID"]
 SPREADSHEET_ID = os.environ["SPREADSHEET_ID"]
 GOOGLE_CREDENTIALS_JSON = os.environ["GOOGLE_CREDENTIALS"]
 
-# Инициализация клиента Gemini
 client = genai.Client(api_key=GEMINI_API_KEY)
 
-# RSS-источники
 KZ_NEWS_FEEDS = [
     "https://kaz.tengrinews.kz/rss/",
     "https://informburo.kz/kaz/rss/all.xml"
@@ -36,12 +33,14 @@ def get_google_sheet():
         "https://www.googleapis.com/auth/spreadsheets",
         "https://www.googleapis.com/auth/drive"
     ]
-    creds = Credentials.from_service_account_info(creds_dict, scopes=scopes)
+    creds = Credentials.from_service_account_info(
+        creds_dict, scopes=scopes
+    )
     gc = gspread.authorize(creds)
     sheet = gc.open_by_key(SPREADSHEET_ID).sheet1
 
     if not sheet.row_values(1):
-        sheet.append_row(["Уақыты", "Рубрика", "Бірегей ID немесе Сілтеме", "Тақырыбы"])
+        sheet.append_row(["Уақыты", "Рубрика", "ID", "Тақырыбы"])
     return sheet
 
 
@@ -60,7 +59,9 @@ def fetch_new_rss_item(feeds, published_ids):
         for entry in feed.entries:
             link = entry.get("link", "").strip()
             if link and link not in published_ids:
-                summary = entry.get("summary", entry.get("description", ""))
+                summary = entry.get(
+                    "summary", entry.get("description", "")
+                )
                 return {
                     "title": entry.get("title", "Тақырыпсыз"),
                     "summary": summary,
@@ -78,16 +79,18 @@ def generate_text_with_gemini(prompt):
 
 
 def send_to_telegram(text):
-    url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
+    url = (
+        "https://api.telegram.org/bot"
+        f"{TELEGRAM_BOT_TOKEN}/sendMessage"
+    )
     payload = {
         "chat_id": TELEGRAM_CHAT_ID,
         "text": text,
         "parse_mode": "HTML",
         "disable_web_page_preview": False
     }
-    response = requests.post(url, json=payload, timeout=30)
-    if not response.ok:
-        print(f"HTML қатесі, қарапайым мәтінмен жіберілуде: {response.text}")
+    r = requests.post(url, json=payload, timeout=30)
+    if not r.ok:
         payload.pop("parse_mode")
         r2 = requests.post(url, json=payload, timeout=30)
         r2.raise_for_status()
@@ -96,14 +99,104 @@ def send_to_telegram(text):
 def run_kz_news(sheet, published_ids):
     item = fetch_new_rss_item(KZ_NEWS_FEEDS, published_ids)
     if not item:
-        print("Жаңа Қазақстан жаңалығы табылмады.")
+        print("Жаңа жаңалық табылмады.")
         return
 
-    prompt = (
-        "Сен кәсіби қазақтілді Telegram-арнаның бас редакторысың.\n"
-        "Мына жаңалықтың негізінде қысқа, нақты әрі тартымды пост жаз:\n"
-        f"Тақырыбы: {item['title']}\n"
-        f"Мазмұны: {item['summary']}\n\n"
-        "Талаптар:\n"
-        "- Тек сауатты, табиғи қазақ тілінде жаз.\n"
-        "- Форматтау үшін тек Telegram HTML тегтерін (<b>қалың</b>, <i>көлбеу</i>
+    lines = [
+        "Сен қазақтілді Telegram-арна редакторысың.",
+        "Мына жаңалықтан қысқа әрі тартымды пост жаз:",
+        f"Тақырыбы: {item['title']}",
+        f"Мазмұны: {item['summary']}",
+        "Талаптар:",
+        "- Тек сауатты қазақ тілінде жаз.",
+        "- Тек HTML тегтерін (<b>, <i>) қолдан.",
+        "- Markdown жұлдызшаларын мүлдем қолданба!",
+        "- Негізгі ойды 2-3 қысқа абзацпен жеткіз.",
+        f"- Соңына <a href='{item['link']}'>Толығырақ</a>",
+        "  сілтемесін және 2-3 хэштег қос.",
+        "- Кіріспе сөз жазба, бірден пост мәтінін бер."
+    ]
+    prompt = "\n".join(lines)
+
+    post_text = generate_text_with_gemini(prompt)
+    send_to_telegram(post_text)
+    save_to_sheet(sheet, "kz_news", item["link"], item["title"])
+    print("Сәтті жарияланды [KZ News]")
+
+
+def run_tech_ai(sheet, published_ids):
+    item = fetch_new_rss_item(TECH_AI_FEEDS, published_ids)
+    if not item:
+        print("Жаңа Техно жаңалық табылмады.")
+        return
+
+    lines = [
+        "Сен ЖИ және технология туралы жазатын сарапшысың.",
+        "Мына мақаланы қазақ тіліне аударып, пост жаса:",
+        f"Тақырыбы: {item['title']}",
+        f"Мазмұны: {item['summary']}",
+        "Талаптар:",
+        "- Жеңіл әрі түсінікті қазақ тілінде жаз.",
+        "- Тек HTML тегтерін (<b>, <i>) қолдан.",
+        "- Markdown мүлдем қолданба!",
+        "- Құрылымы: Тақырып, Не болды, Маңызы (2-3 пункт).",
+        f"- Соңына <a href='{item['link']}'>Дереккөз</a>",
+        "  сілтемесін және #ЖИ #Технология хэштегін қос.",
+        "- Ешқандай кіріспе сөз қоспа."
+    ]
+    prompt = "\n".join(lines)
+
+    post_text = generate_text_with_gemini(prompt)
+    send_to_telegram(post_text)
+    save_to_sheet(sheet, "tech_ai", item["link"], item["title"])
+    print("Сәтті жарияланды [Tech/AI]")
+
+
+def run_lifehacks(sheet, published_ids):
+    past = [x for x in published_ids if x.startswith("TOPIC:")]
+    recent_str = ", ".join(past[-30:]) if past else "Жоқ"
+
+    lines = [
+        "Сен танымдық Telegram-арнаның авторысың.",
+        "1 ғылыми/тарихи дерек ЖӘНЕ 1 пайдалы лайфхак жаз.",
+        f"Мына тақырыптарды қайталама: [{recent_str}]",
+        "Бірінші жолға тек тақырып кодын жаз, мысалы:",
+        "TOPIC: Помодоро әдісі және ми",
+        "Екінші жолдан бастап дайын постты жаз:",
+        "- Тек HTML тегтерін (<b>, <i>) қолдан.",
+        "- Markdown мүлдем қолданба!",
+        "- Соңында оқырманға 1 сұрақ қой және",
+        "  #пайдалы #лайфхак #дерек хэштегтерін қос."
+    ]
+    prompt = "\n".join(lines)
+
+    raw_output = generate_text_with_gemini(prompt)
+    out_lines = raw_output.splitlines()
+
+    now_str = datetime.now().strftime("%Y-%m-%d %H:%M")
+    topic_id = f"TOPIC: {now_str}"
+    post_lines = []
+
+    for line in out_lines:
+        if line.strip().startswith("TOPIC:"):
+            topic_id = line.strip()
+        else:
+            post_lines.append(line)
+
+    post_text = "\n".join(post_lines).strip()
+    send_to_telegram(post_text)
+    save_to_sheet(sheet, "lifehack", topic_id, topic_id)
+    print("Сәтті жарияланды [Lifehack]")
+
+
+if __name__ == "__main__":
+    mode = sys.argv[1] if len(sys.argv) > 1 else "kz_news"
+    sheet = get_google_sheet()
+    published = get_published_ids(sheet)
+
+    if mode == "kz_news":
+        run_kz_news(sheet, published)
+    elif mode == "tech_ai":
+        run_tech_ai(sheet, published)
+    elif mode == "lifehack":
+        run_lifehacks(sheet, published)
