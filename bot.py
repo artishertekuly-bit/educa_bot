@@ -20,13 +20,11 @@ TELEGRAM_CHAT_ID = os.environ["TELEGRAM_CHAT_ID"]
 SPREADSHEET_ID = os.environ["SPREADSHEET_ID"]
 GOOGLE_CREDENTIALS_JSON = os.environ["GOOGLE_CREDENTIALS"]
 
-# Тайм-аутты 120 секундқа (120000 мс) дейін ұзартамыз
 client = genai.Client(
     api_key=GEMINI_API_KEY,
     http_options=types.HttpOptions(timeout=120000)
 )
 
-# Қазақстан жаңалықтары (тікелей әрі жылдам RSS көздері бірінші тұрады)
 KZ_NEWS_FEEDS = [
     "https://kaz.tengrinews.kz/rss/",
     "https://informburo.kz/kaz/rss/all.xml",
@@ -47,10 +45,8 @@ SUBSCRIBE_FOOTER = (
 
 
 def clean_telegram_html(text):
-    """Telegram қолдамайтын HTML тегтері мен Markdown белгілерін тазалау."""
     text = re.sub(r"^```[a-zA-Z]*\n?", "", text.strip())
     text = re.sub(r"\n?```$", "", text.strip())
-
     text = re.sub(r"<br\s*/?>", "\n", text, flags=re.IGNORECASE)
     text = re.sub(r"</p>", "\n\n", text, flags=re.IGNORECASE)
     text = re.sub(r"<p[^>]*>", "", text, flags=re.IGNORECASE)
@@ -103,7 +99,6 @@ def fetch_new_rss_item(feeds, published_ids):
                     raw_summary = entry.get(
                         "summary", entry.get("description", "")
                     )
-                    # RSS ішіндегі қоқыс HTML тегтерін тазалау (Gemini жылдам оқуы үшін)
                     clean_summary = re.sub(r"<[^>]+>", " ", raw_summary)
                     clean_summary = re.sub(r"\s+", " ", clean_summary).strip()
                     return {
@@ -117,22 +112,20 @@ def fetch_new_rss_item(feeds, published_ids):
 
 
 def generate_text_with_gemini(prompt):
-    """Gemini сервері бос болмаса (504/503), бірнеше рет қайталап көру."""
-    models = ["gemini-3.8-flash", "gemini-3-flash-preview"]
-    for attempt in range(1, 4):
-        for model_name in models:
-            try:
-                log(f"Gemini сұранысы (Талпыныс {attempt}, модель: {model_name})...")
-                response = client.models.generate_content(
-                    model=model_name,
-                    contents=prompt,
-                )
-                if response and response.text:
-                    return clean_telegram_html(response.text)
-            except Exception as e:
-                log(f"Ескерту ({model_name}): {e}")
-                time.sleep(5)
-    raise RuntimeError("Gemini сервері уақытша жауап бермеді. Сәлден соң қайта қосыңыз.")
+    """Тұрақты gemini-2.5-flash моделін қолдану және қате болса 4 рет қайталау."""
+    for attempt in range(1, 5):
+        try:
+            log(f"Gemini сұранысы (Талпыныс {attempt})...")
+            response = client.models.generate_content(
+                model="gemini-2.5-flash",
+                contents=prompt,
+            )
+            if response and response.text:
+                return clean_telegram_html(response.text)
+        except Exception as e:
+            log(f"Ескерту (Талпыныс {attempt}): {e}")
+            time.sleep(6)
+    raise RuntimeError("Gemini сервері қазір жүктелген. Сәлден соң қайта көріңіз.")
 
 
 def send_to_telegram(text):
