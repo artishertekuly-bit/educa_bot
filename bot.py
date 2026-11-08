@@ -2,6 +2,7 @@ import os
 import re
 import json
 import sys
+import time
 from datetime import datetime
 import feedparser
 import requests
@@ -19,15 +20,18 @@ TELEGRAM_CHAT_ID = os.environ["TELEGRAM_CHAT_ID"]
 SPREADSHEET_ID = os.environ["SPREADSHEET_ID"]
 GOOGLE_CREDENTIALS_JSON = os.environ["GOOGLE_CREDENTIALS"]
 
+# Тайм-аутты 120 секундқа (120000 мс) дейін ұзартамыз
 client = genai.Client(
     api_key=GEMINI_API_KEY,
-    http_options=types.HttpOptions(timeout=60000)
+    http_options=types.HttpOptions(timeout=120000)
 )
 
+# Қазақстан жаңалықтары (тікелей әрі жылдам RSS көздері бірінші тұрады)
 KZ_NEWS_FEEDS = [
-    "https://news.google.com/rss/search?q=Қазақстан&hl=kk&gl=KZ&ceid=KZ:kk",
     "https://kaz.tengrinews.kz/rss/",
-    "https://informburo.kz/kaz/rss/all.xml"
+    "https://informburo.kz/kaz/rss/all.xml",
+    "https://www.zakon.kz/rss/kaz_all.xml",
+    "https://news.google.com/rss/search?q=Қазақстан&hl=kk&gl=KZ&ceid=KZ:kk"
 ]
 
 TECH_AI_FEEDS = [
@@ -35,7 +39,6 @@ TECH_AI_FEEDS = [
     "https://www.theverge.com/rss/index.xml"
 ]
 
-# Әр посттың астына автоматты түрде қосылатын тіркелуге шақыру сөзі
 SUBSCRIBE_FOOTER = (
     "\n\n🔔 <b>Осындай маңызды жаңалықтар мен пайдалы "
     "ақпараттарды күн сайын оқығыңыз келсе, "
@@ -48,15 +51,10 @@ def clean_telegram_html(text):
     text = re.sub(r"^```[a-zA-Z]*\n?", "", text.strip())
     text = re.sub(r"\n?```$", "", text.strip())
 
-    # <br> және <p> тегтерін кәдімгі жаңа жолға (\n) ауыстыру
     text = re.sub(r"<br\s*/?>", "\n", text, flags=re.IGNORECASE)
     text = re.sub(r"</p>", "\n\n", text, flags=re.IGNORECASE)
     text = re.sub(r"<p[^>]*>", "", text, flags=re.IGNORECASE)
-
-    # Markdown **қалың** жазуын HTML <b>қалың</b> тегіне ауыстыру
     text = re.sub(r"\*\*(.+?)\*\*", r"<b>\1</b>", text)
-
-    # Артық бос жолдарды қысқарту
     text = re.sub(r"\n{3,}", "\n\n", text)
     return text.strip()
 
@@ -102,12 +100,15 @@ def fetch_new_rss_item(feeds, published_ids):
             for entry in feed.entries:
                 link = entry.get("link", "").strip()
                 if link and link not in published_ids:
-                    summary = entry.get(
+                    raw_summary = entry.get(
                         "summary", entry.get("description", "")
                     )
+                    # RSS ішіндегі қоқыс HTML тегтерін тазалау (Gemini жылдам оқуы үшін)
+                    clean_summary = re.sub(r"<[^>]+>", " ", raw_summary)
+                    clean_summary = re.sub(r"\s+", " ", clean_summary).strip()
                     return {
                         "title": entry.get("title", "Тақырыпсыз"),
-                        "summary": summary[:1500],
+                        "summary": clean_summary[:1000],
                         "link": link
                     }
         except Exception as e:
@@ -116,11 +117,22 @@ def fetch_new_rss_item(feeds, published_ids):
 
 
 def generate_text_with_gemini(prompt):
-    response = client.models.generate_content(
-        model="gemini-3.8-flash",
-        contents=prompt,
-    )
-    return clean_telegram_html(response.text)
+    """Gemini сервері бос болмаса (504/503), бірнеше рет қайталап көру."""
+    models = ["gemini-3.8-flash", "gemini-3-flash-preview"]
+    for attempt in range(1, 4):
+        for model_name in models:
+            try:
+                log(f"Gemini сұранысы (Талпыныс {attempt}, модель: {model_name})...")
+                response = client.models.generate_content(
+                    model=model_name,
+                    contents=prompt,
+                )
+                if response and response.text:
+                    return clean_telegram_html(response.text)
+            except Exception as e:
+                log(f"Ескерту ({model_name}): {e}")
+                time.sleep(5)
+    raise RuntimeError("Gemini сервері уақытша жауап бермеді. Сәлден соң қайта қосыңыз.")
 
 
 def send_to_telegram(text):
