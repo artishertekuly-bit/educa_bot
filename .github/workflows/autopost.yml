@@ -1,26 +1,31 @@
+
 name: Telegram Auto Poster
 
 on:
   schedule:
-    # UTC уақытымен жазылады (Қазақстан уақыты UTC+5)
-    - cron: '0 4 * * *'   # 09:00 (Таңғы Қазақстан жаңалықтары)
-    - cron: '0 9 * * *'   # 14:00 (Түскі ЖИ және Технология)
-    - cron: '0 14 * * *'  # 19:00 (Кешкі Лайфхак пен Қызықты дерек)
-  workflow_dispatch:      # Қолмен тексеріп қосу батырмасы
+    - cron: "13 4 * * *"   # 09:13 Қазақстан уақыты
+    - cron: "27 9 * * *"   # 14:27 Қазақстан уақыты
+    - cron: "41 14 * * *"  # 19:41 Қазақстан уақыты
+
+  workflow_dispatch:
     inputs:
       rubric:
-        description: 'Қай рубриканы тексергіңіз келеді?'
+        description: "Қай рубриканы іске қосу керек?"
         required: true
-        default: 'kz_news'
+        default: "kz_news"
         type: choice
         options:
           - kz_news
           - tech_ai
           - lifehack
 
+permissions:
+  contents: read
+
 jobs:
   publish_post:
     runs-on: ubuntu-latest
+
     steps:
       - name: Репозиторий кодын жүктеу
         uses: actions/checkout@v4
@@ -28,27 +33,37 @@ jobs:
       - name: Python 3.11 орнату
         uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
+          python-version: "3.11"
 
       - name: Кітапханаларды орнату
         run: pip install -r requirements.txt
 
-      - name: Рубриканы уақыт бойынша анықтау және іске қосу
+      - name: Рубриканы анықтау және іске қосу
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           SPREADSHEET_ID: ${{ secrets.SPREADSHEET_ID }}
           GOOGLE_CREDENTIALS: ${{ secrets.GOOGLE_CREDENTIALS }}
+
         run: |
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             MODE="${{ github.event.inputs.rubric }}"
-          elif [ "${{ github.event.schedule }}" = "0 4 * * *" ]; then
+
+          elif [ "${{ github.event.schedule }}" = "13 4 * * *" ]; then
             MODE="kz_news"
-          elif [ "${{ github.event.schedule }}" = "0 9 * * *" ]; then
+
+          elif [ "${{ github.event.schedule }}" = "27 9 * * *" ]; then
             MODE="tech_ai"
-          else
+
+          elif [ "${{ github.event.schedule }}" = "41 14 * * *" ]; then
             MODE="lifehack"
+
+          else
+            echo "Белгісіз іске қосу кестесі!"
+            exit 1
           fi
+
           echo "Іске қосылған рубрика: $MODE"
+
           python bot.py "$MODE"
